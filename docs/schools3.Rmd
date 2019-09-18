@@ -1,6 +1,5 @@
 ---
 title: "School data"
-output: html_notebook
 ---
 
 The Department for Education's [Edubase data set](https://get-information-schools.service.gov.uk/Downloads) contains basic information about every school in England and Wales. We are going to use it to explore some of the characteristcs of English schools. Let's have a look at the attributes of the data set. 
