@@ -1,0 +1,133 @@
+---
+title: "School data"
+output: html_notebook
+---
+
+The Department for Education's [Edubase data set](https://get-information-schools.service.gov.uk/Downloads) contains basic information about every school in England and Wales. We are going to use it to explore some of the characteristcs of English schools. Let's have a look at the attributes of the data set. 
+
+```{r}
+# Load data set
+# sch_data <- read.csv("edubasealldata20190911.csv")
+
+# The dplyr library is great for data wrangling
+library(dplyr)
+
+# Remove closed schools
+# sch_data_open <- sch_data  %>% filter(!EstablishmentStatus..name.=="Closed")
+
+feats <- c("NumberOfPupils", "NumberOfBoys", "NumberOfGirls", "PhaseOfEducation..name.", "EstablishmentTypeGroup..name.", "EstablishmentName", "TypeOfEstablishment..name.", "Easting", "Northing", "AdmissionsPolicy..name.")
+
+# Remove Welsh schools
+# sch_data_en <- sch_data_open %>% filter(!sch_data_open$GOR..name.=="Wales (pseudo)")
+
+# sch_data_en <- sch_data_en[feats]
+
+# write.csv(sch_data_en, file = "sch_data_en.csv")
+
+sch_data_en <- read.csv("sch_data_en.csv")
+
+```
+
+Most primary schools have under 500 pupils on roll and with a particuarly large number of schools having 200 to 250 pupils. Secondary schools typically have much larger rolls of between 500 and 1500 pupils.
+```{r}
+library(ggplot2)
+
+# Create new frame only where record contains pupil roll info
+with_roll <- sch_data_en[!is.na(sch_data_en$NumberOfPupils),]
+
+# New frame with only secondary and primary
+with_roll2 <- filter(with_roll, PhaseOfEducation..name.=="Secondary" | PhaseOfEducation..name.=="Primary")
+
+# Set breaks for plot
+brks = round(seq(min(with_roll2$NumberOfPupils), 2500, by = 50),1)
+
+# Histogram plot of primary and secondary school rolls
+ggplot(with_roll2, aes(x=NumberOfPupils, fill=PhaseOfEducation..name.)) + geom_histogram(alpha=0.5, position="identity", breaks=brks) +   scale_x_continuous(name="Pupils on roll", expand = c(0, 0)) + scale_y_continuous(expand = c(0, 0)) + labs(x = "Pupil roll", y = "Number of schools", title="Pupils on roll by school type in England")
+```
+
+The Department for Education defines eight broad types of educational establishments. The most common tye of school are local authority maintained schools (mainly consisting of primary), followed by Academies. In this context universities refers to university technical colleges rather than traditional universities. 
+
+```{r}
+ par(las=1) # Make label text perpendicular to axis
+counts <- table(droplevels(sch_data_en$EstablishmentTypeGroup..name.))
+par(mar=c(5,12,4,1)+.1) # Change margin so taables display properly
+counts2  <- sort(counts) # Change order of bars
+barplot(counts2, main="School types",
+   xlab="Number of schools", horiz=TRUE, cex.names=0.8, axes=FALSE, col="blue")
+axis(side=1, at=seq(0, 30000, by=5000), srt=90, cex.axis=0.8)
+```
+
+The overall girl-boy split is of little interest as it will mainly reflect the cohort at the time. However, looking at school types, we see special schools, alternative provision schools and university technical colleges tend to have a higher enrollment of boys. This is due to the fact boys are more likely to be excluded or otherwise have trouble in mainstream school than girls. 
+
+```{r}
+# We are going to get the data we need this time using an SQL query using the sqldf library 
+library(sqldf)
+
+# SQL doesn't like attribute names with dots so we will replicate this column using a new name
+sch_data_en$SchoolType <- sch_data_en$TypeOfEstablishment..name.
+
+# Here is the SQL query
+gb_type <- sqldf('SELECT NumberOfBoys, NumberOfGirls, NumberOfPupils, SchoolType FROM sch_data_en')
+
+
+collapsed <- gb_type %>% group_by(SchoolType) %>% summarise_at(vars(NumberOfGirls,NumberOfBoys,NumberOfPupils),funs(sum(.,na.rm=TRUE)))
+
+collapsed$girls <- collapsed$NumberOfGirls / collapsed$NumberOfPupils * 100 # Proportion of boys
+collapsed$boys <- collapsed$NumberOfBoys / collapsed$NumberOfPupils * 100
+collapsed <- na.omit(collapsed) # Omit all NA values
+row_sub = apply(collapsed, 1, function(row) all(row !=0 )) # Function to replace zero values
+collapsed <- collapsed[row_sub,]
+
+# Need another boys proportion attribute as will be using 'gather' in net step
+collapsed$boys2 <- collapsed$NumberOfGirls / collapsed$NumberOfPupils * 100
+library(tidyr)
+
+collapsed %>% 
+   select(-NumberOfPupils) %>% 
+   gather(type, count, boys:girls) %>% 
+  
+  ggplot(., aes(x=reorder(SchoolType, boys2), y = count, fill=forcats::fct_rev(type))) +
+   geom_bar(stat="identity") + coord_flip() + ylab("Proportion") + labs(fill='', title = "Girl-boy split by school type", x = "School type") 
+```
+
+England used to have a bipartite state education system consisting of selective "grammar schools"" and non-selective "secondary-modern schools". The opening of this type of school was banned by the Labour government in 1965 and since then, many grammar schools converted to become "comprehensive"" (non-selective) school. Some local authorities successfully fought to retain their selective schools. Those which remain are shown in the map below. 
+
+```{r}
+library(tmap)
+library(tmaptools)
+library(rgdal)
+library(tmap)
+library(tmaptools)
+
+# Load shape file
+regs2 <- readOGR(".", "Regions_December_2017_Super_Generalised_Clipped_Boundaries_in_England")
+
+# Remove schools missing coordinates 
+sch_data2 <- sch_data_en[!is.na(sch_data_en$Easting),]
+
+# Remove indepdenent schools
+non_indep <- sch_data2[(sch_data2$EstablishmentTypeGroup..name. != "Independent schools"),]
+
+# Get the selective
+sel_sch <- non_indep[(non_indep$AdmissionsPolicy..name. == "Selective"),]
+
+# Create new dataframe containing
+d <- data.frame(lon=sel_sch$Easting, lat=sel_sch$Northing, name=sel_sch$EstablishmentName, pupils=sel_sch$NumberOfPupils)
+
+# Define coordinates
+coordinates(d) <- c("lon", "lat")
+
+# Set projection
+proj4string(d) <- CRS("+init=epsg:27700")
+proj4string(regs2) <- CRS("+init=epsg:27700")
+
+# Plot selective schools
+qtm(regs2) + qtm(d)
+
+```
+
+
+
+
+
+
