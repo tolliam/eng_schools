@@ -126,7 +126,7 @@ proj4string(d) <- CRS("+init=epsg:27700")
 proj4string(regs2) <- CRS("+init=epsg:27700")
 
 # Plot selective schools
-qtm(regs2) + qtm(d)
+tmap_leaflet(qtm(regs2) + qtm(d))
 
 ```
 
