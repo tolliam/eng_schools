@@ -1,3 +1,3 @@
 # eng_schools
 
-[test](schools3.Rmd)
+[test](schools3.nb.html)
